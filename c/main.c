@@ -167,7 +167,8 @@ main_loop:
 			close(c_sock);
 			close(w_addr);
 			continue;
-		} else if(strcmp(target, "/c/login")) {
+		} else if(strcmp(target, "/c/login") == 0) {
+			fprintf(stderr, "/c/login\n");
 			p = searchJson(json, "email");
 			if(p == NULL) goto NotFound;
 			email = (char*)p->data;
@@ -178,16 +179,20 @@ main_loop:
 			sprintf(sql, "select * from users where email='%s';", email);
 			res = PQexec(conn, sql);
 			if(PQntuples(res) == 0) {
+				fprintf(stderr, "user not found.\n");
 				goto NotFound;
 			}
-			if(strcmp(email,PQgetvalue(res, 0, PQfnumber(res, "password_hash"))) == 0) {
+			if(strcmp(password,PQgetvalue(res, 0, PQfnumber(res, "password_hash"))) == 0) {
 				sendSuccessEmail(c_sock, email);
 				close(c_sock);
 				close(w_addr);
+				continue;
 			} else {
+				fprintf(stderr, "password wrong.\n");
 				goto NotFound;
 			}
 		}
+		goto NotFound;
 	}
 NotFound:
 	printf("%d",sendNotFound(c_sock));
