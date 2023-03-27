@@ -9,9 +9,9 @@ int createResponseMessage(char* response_message, int status,
 		char* header, char* body, unsigned int body_size);
 int sendResponseMessage(int sock, char* response_message, unsigned int message_size);
 unsigned int getFileSize(const char* path);
-void sendNotFound(int sock);
-void sendSuccess(int sock);
-void sendSuccessEmail(int sock, char* email);
+int sendNotFound(int sock);
+int sendSuccess(int sock);
+int sendSuccessEmail(int sock, char* email);
 int getBody(char *body, char *request_message);
 
 #endif

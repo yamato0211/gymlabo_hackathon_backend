@@ -86,6 +86,7 @@ int getBody(char *body, char *request_message) {
 			strcpy(body, "");
 			return -1;
 		}
+		p++;
 	}
 	strcpy(body, p+2);
 	return 0;
@@ -282,24 +283,24 @@ int m(void) {
 	return 0;
 }*/
 
-void sendNotFound(int sock) {
+int sendNotFound(int sock) {
 	char response[SIZE];
-	sprintf(response, "HTTP/1.1 404 NotFound\r\n%s", HEADER);
+	sprintf(response, "HTTP/1.1 404 NotFound\r\n%s\r\nnot found.", HEADER);
 	int len = strlen(response);
-	send(sock, response, len, 0);
+	return send(sock, response, len, 0);
 }
 
-void sendSuccess(int sock) {
+int sendSuccess(int sock) {
 	char response[SIZE];
 	sprintf(response, "HTTP/1.1 200 OK\r\n%s", HEADER);
 	int len = strlen(response);
-	send(sock, response, len, 0);
+	return send(sock, response, len, 0);
 }
 
-void sendSuccessEmail(int sock, char* email) {
+int sendSuccessEmail(int sock, char* email) {
 	char response[SIZE];
 	sprintf(response, "HTTP/1.1 200 OK\r\n%s\r\n%s", HEADER, email);
 	int len = strlen(response);
-	send(sock, response, len, 0);
+	return send(sock, response, len, 0);
 }
 

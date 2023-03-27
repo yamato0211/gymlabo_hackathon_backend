@@ -9,8 +9,8 @@
 #include "http/http.h"
 #include "json/json.h"
 
-#define SERVER_ADDR "118.27.20.227"
-#define SERVER_PORT 8001
+#define SERVER_ADDR "127.0.0.1"
+#define SERVER_PORT 8080
 #define SIZE (5*1024)
 
 int main(void){
@@ -34,7 +34,7 @@ int main(void){
 	PGconn *conn;
 	PGresult *res;
 
-	conn = PQconnectdb("host=db port=5432 dbname=test user=user password=password");
+	conn = PQconnectdb("host=localhost port=5432 dbname=test user=user password=password");
 	if(PQstatus(conn) != CONNECTION_OK) {
 		fprintf(stderr, "Connection to databese failed: %s\n", PQerrorMessage(conn));
 		PQfinish(conn);
@@ -84,29 +84,37 @@ main_loop:
 		}
 		printf("Connected!!\n");
 
+		fprintf(stderr, "recvRequestMessage call.\n");
 		request_size = recvRequestMessage(c_sock, request_message, SIZE);
+		fprintf(stderr, "%s\n", request_message);
 		if(request_size == -1) {
-			printf("recvRequestMessage error\n");
+			fprintf(stderr, "recvRequestMessage error\n");
 			continue;
 		}
 
 		if(request_size == 0) {
-			printf("connection ended.\n");	
+			fprintf(stderr,"connection ended.\n");	
 			continue;
 		}
 
+		fprintf(stderr, "parseRequestMessage call.\n");
 		if(parseRequestMessage(method, target, request_message) == -1) {
-			printf("parseRequestMessage error.\n");
+			fprintf(stderr,"parseRequestMessage error.\n");
 			continue;
 		}
 
+		fprintf(stderr, "check method.\n");
 		if(strcmp(method, "POST") == 0) {
+			fprintf(stderr, "getBody call.\n");
 			getBody(request_body, request_message);
+			fprintf(stderr, "%s\n",request_body);
 		} else {
+			fprintf(stderr, "method is not post.\n");
 			status = 404;
 		}
 
 		if(strcmp(request_body, "") == 0) {
+			fprintf(stderr,"request_body is empty.\n");
 			status = 404;
 		} else {
 			json = analyzeJson(request_body);
@@ -173,7 +181,8 @@ main_loop:
 		}
 	}
 NotFound:
-	sendNotFound(c_sock);
+	printf("%d",sendNotFound(c_sock));
+	printf("NotFound\n");
 	close(c_sock);
 	close(w_addr);
 	goto main_loop;
