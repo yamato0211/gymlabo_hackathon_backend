@@ -6,6 +6,4 @@ COPY . /go
 
 RUN go env -w GO111MODULE=off
 
-RUN go build -o server .
-
 CMD ["/go/server"]

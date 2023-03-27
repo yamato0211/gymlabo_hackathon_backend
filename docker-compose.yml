@@ -1,11 +1,23 @@
 version: '3'
 services:
+  db:
+    image: postgres:15.2-alpine
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=test
   go-api:
     build: ./go
     volumes:
       - ./go:/go
     ports:
       - "8000:8000"
+    depends_on:
+      - db
   proxy:
     build: ./nginx
     ports:
@@ -18,3 +30,17 @@ services:
       - /var/www/html:/var/www/html
     depends_on:
       - go-api
+  pgadmin:
+    image: dpage/pgadmin4:6.11
+    ports:
+      - 8080:80
+    volumes:
+      - ./pgadmin:/var/lib/pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: example@example.com
+      PGADMIN_DEFAULT_PASSWORD: password
+    depends_on:
+      - db
+volumes:
+  dbdata:
+    name: gymlabo-dev
