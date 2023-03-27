@@ -6,18 +6,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include "../json/json.h"
+#include "http.h"
 
-#define SERVER_ADDR "150.69.229.253"
-#define SERVER_PORT 8080
+#define HEADER "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Allow-Credentials: true\r\nAccess-Control-Allow-Methods: GET,PUT,POST,DELETE,UPDATE,OPTIONS\r\n"
+
 #define SIZE (5*1024)
-
-int httpServer(int);
-int recvRequestMessage(int, char*, unsigned int);
-int parseRequestMessage(char*, char*, char*);
-int getProcessing(char**, char*);
-int createResponseMessage(char*, int, char*, char*, unsigned int);
-int sendResponseMessage(int, char*, unsigned int);
-unsigned int getFileSize(const char*);
 
 //ファイルサイズを取得する
 unsigned int getFileSize(const char *path) {
@@ -82,6 +76,18 @@ int parseRequestMessage(char *method, char *target, char *request_message) {
 	}
 	strcpy(target, tmp_target);
 
+	return 0;
+}
+
+int getBody(char *body, char *request_message) {
+	char *p = request_message;
+	while(!(p[0] == '\n' && p[1] == '\n')) {
+		if(p[1] == '\0') {
+			strcpy(body, "");
+			return -1;
+		}
+	}
+	strcpy(body, p+2);
 	return 0;
 }
 
@@ -175,53 +181,50 @@ int httpServer(int sock) {
 	char method[SIZE];
 	char target[SIZE];
 	char header_field[SIZE];
+	char request_body[SIZE];
 	char *body;
 	int status;
 	unsigned int file_size;
 
 
-		request_size = recvRequestMessage(sock, request_message, SIZE);
-		if(request_size == -1) {
-			printf("recvRequestMessage error\n");
-			return 0;
-		}
+	request_size = recvRequestMessage(sock, request_message, SIZE);
+	if(request_size == -1) {
+		printf("recvRequestMessage error\n");
+		return 0;
+	}
 
-		if(request_size == 0) {
-			printf("connection ended\n");
-			return 0;
-		}
+	if(request_size == 0) {
+		printf("connection ended\n");
+		return 0;
+	}
 
-		showMessage(request_message, request_size);
-		
-		if(parseRequestMessage(method, target, request_message) == -1) {
-			printf("parseRequestMessage error\n");
-			return 0;
-		}
+	if(parseRequestMessage(method, target, request_message) == -1) {
+		printf("parseRequestMessage error\n");
+		return 0;
+	}
 
-		if(strcmp(method, "GET") == 0) {
-			if(strcmp(target, "/") == 0) {
-				strcpy(target, "/index.html");
-			}
-			status = getProcessing(&body, &target[1]);
-		} else {
-			status = 404;
-		}
+	if(strcmp(method, "POST") == 0) {
+		getBody(request_body, request_message);
+	} else {
+		status = 404;
+	}
 
-		file_size = getFileSize(&target[1]);
-		sprintf(header_field, "Content-Length: %u\r\n", file_size);
+	Json_t *json = analyzeJson(request_body);
+	if(json == NULL) {
+		status = 404;
+	}
 
-		response_size = createResponseMessage(response_message, status, header_field, body, file_size);
-		if(response_size == -1) {
-			printf("createResponseMessage error\n");
-			return 0;
-		}
+	response_size = createResponseMessage(response_message, status, 
+			header_field, body, file_size);
+	if(response_size == -1) {
+		printf("createResponseMessage error\n");
+		return 0;
+	}
 
-		showMessage(response_message, response_size);
-
-		sendResponseMessage(sock, response_message, response_size);
+	sendResponseMessage(sock, response_message, response_size);
 	return 0;
 }
-
+/*
 int m(void) {
 	int w_addr, c_sock;
 	struct sockaddr_in a_addr;
@@ -277,4 +280,26 @@ int m(void) {
 	close(w_addr);
 	}
 	return 0;
+}*/
+
+void sendNotFound(int sock) {
+	char response[SIZE];
+	sprintf(response, "HTTP/1.1 404 NotFound\r\n%s", HEADER);
+	int len = strlen(response);
+	send(sock, response, len, 0);
 }
+
+void sendSuccess(int sock) {
+	char response[SIZE];
+	sprintf(response, "HTTP/1.1 200 OK\r\n%s", HEADER);
+	int len = strlen(response);
+	send(sock, response, len, 0);
+}
+
+void sendSuccessEmail(int sock, char* email) {
+	char response[SIZE];
+	sprintf(response, "HTTP/1.1 200 OK\r\n%s\r\n%s", HEADER, email);
+	int len = strlen(response);
+	send(sock, response, len, 0);
+}
+
