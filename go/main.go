@@ -50,6 +50,7 @@ func corsMiddleware(h http.Handler) http.Handler {
 
 func main() {
 	mux := http.NewServeMux()
+	mux.Handle("/go/", http.HandlerFunc(hello))
 	mux.Handle("/go/long_polling", corsMiddleware(http.HandlerFunc(longPolling)))
 	mux.Handle("/go/send", corsMiddleware(http.HandlerFunc(send)))
 	mux.Handle("/go/posts/all", corsMiddleware(http.HandlerFunc(getPosts)))
@@ -63,6 +64,10 @@ func main() {
 }
 
 var msgCh = make(chan string)
+
+func hello(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Hello"))
+}
 
 func send(w http.ResponseWriter, r *http.Request) {
 	// msgCh <- r.URL.Query().Get("sender")
