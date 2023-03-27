@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -35,15 +36,28 @@ type CreatePostInput struct {
 	Content string `json:"content"`
 }
 
+func corsMiddleware(h http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,UPDATE,OPTIONS")
+		h.ServeHTTP(w, r)
+	}
+
+	return http.HandlerFunc(fn)
+}
+
 func main() {
-	http.HandleFunc("/long_polling", longPolling)
-	http.HandleFunc("/send", send)
-	http.HandleFunc("/posts/all", getPosts)
-	http.HandleFunc("/post/", getPostsByEmail)
+	mux := http.NewServeMux()
+	mux.Handle("/go/long_polling", corsMiddleware(http.HandlerFunc(longPolling)))
+	mux.Handle("/go/send", corsMiddleware(http.HandlerFunc(send)))
+	mux.Handle("/go/posts/all", corsMiddleware(http.HandlerFunc(getPosts)))
+	mux.Handle("/go/post/", corsMiddleware(http.HandlerFunc(getPostsByEmail)))
 
 	port := "8000"
 	log.Printf("Listening on port %s", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%v", port), nil); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%v", port), mux); err != nil {
 		log.Panicln("Serve Error:", err)
 	}
 }
@@ -53,7 +67,6 @@ var msgCh = make(chan string)
 func send(w http.ResponseWriter, r *http.Request) {
 	// msgCh <- r.URL.Query().Get("sender")
 	createPost(w, r)
-	w.WriteHeader(http.StatusOK)
 }
 
 func longPolling(w http.ResponseWriter, r *http.Request) {
@@ -112,40 +125,49 @@ func getPostsByEmail(w http.ResponseWriter, r *http.Request) {
 }
 
 func createPost(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.WriteHeader(http.StatusBadRequest)
+	fmt.Println("start createPost")
+	fmt.Println(r.Body)
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println("Error reading request body:", err)
 		return
 	}
-	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	fmt.Println("Request body:", string(body))
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	fmt.Println(decoder)
 	var p CreatePostInput
 	if err := decoder.Decode(&p); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println("132", err.Error())
 		return
 	}
 
 	byteArray, err := ioutil.ReadFile("post.json")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Fatal(err)
+		fmt.Println(err.Error())
 		return
 	}
 	var posts PostsDatabase
 	if err := json.Unmarshal(byteArray, &posts); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Fatal(err)
+		fmt.Println("145", err.Error())
 		return
 	}
 
 	byteUserArray, err := ioutil.ReadFile("user.json")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Fatal(err)
+		fmt.Println("152", err.Error())
 		return
 	}
 	var users Users
 	if err := json.Unmarshal(byteUserArray, &users); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Fatal(err)
+		fmt.Println("158", err.Error())
 		return
 	}
 
@@ -158,13 +180,13 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 	posts["kizuku@mail.com"].Posts[newPostIndex] = new
 	updatedJSON, err := json.Marshal(posts)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("171", err.Error())
 		return
 	}
 
 	err = ioutil.WriteFile("post.json", updatedJSON, 0644)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("177", err.Error())
 		return
 	}
 	msgCh <- fmt.Sprintf("POST kizuku@mail.com %s %s", users["kizuku@mail.com"].Name, users["kizuku@mail.com"].Image)
