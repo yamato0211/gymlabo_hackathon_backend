@@ -43,4 +43,3 @@ services:
       - db
 volumes:
   dbdata:
-    name: gymlabo-dev
