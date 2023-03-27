@@ -18,6 +18,14 @@ services:
       - "8000:8000"
     depends_on:
       - db
+  c-api: 
+    build: ./c
+    volumes:
+      - ./c:/c
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db
   proxy:
     build: ./nginx
     ports:
@@ -30,6 +38,7 @@ services:
       - /var/www/html:/var/www/html
     depends_on:
       - go-api
+      - c-api
   pgadmin:
     image: dpage/pgadmin4:6.11
     ports:
