@@ -284,13 +284,15 @@ int m(void) {
 
 void sendNotFound(int sock) {
 	char response[SIZE];
-	sprintf(response, "HTTP/1.1 404 NotFound\r\n%s", HEADER);
+	printf("hoge fuga");
+	sprintf(response, "HTTP/1.1 404 NotFound\r\n%snot found.", HEADER);
 	int len = strlen(response);
 	send(sock, response, len, 0);
 }
 
 void sendSuccess(int sock) {
 	char response[SIZE];
+	printf("hoge fuga1");
 	sprintf(response, "HTTP/1.1 200 OK\r\n%s", HEADER);
 	int len = strlen(response);
 	send(sock, response, len, 0);
@@ -298,6 +300,7 @@ void sendSuccess(int sock) {
 
 void sendSuccessEmail(int sock, char* email) {
 	char response[SIZE];
+	printf("hoge fuga2");
 	sprintf(response, "HTTP/1.1 200 OK\r\n%s\r\n%s", HEADER, email);
 	int len = strlen(response);
 	send(sock, response, len, 0);

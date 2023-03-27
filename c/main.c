@@ -9,7 +9,7 @@
 #include "http/http.h"
 #include "json/json.h"
 
-#define SERVER_ADDR "118.27.20.227"
+#define SERVER_ADDR "172.29.0.3"
 #define SERVER_PORT 8001
 #define SIZE (5*1024)
 
@@ -75,14 +75,14 @@ main_loop:
 			return -1;
 		}
 
-		printf("Waiting connect...\n");
+		fprintf(stderr, "Waiting connect...\n");
 		c_sock = accept(w_addr, NULL, NULL);
 		if(c_sock == -1) {
 			perror("accept");
 			close(w_addr);
 			return -1;
 		}
-		printf("Connected!!\n");
+		fprintf(stderr, "Connected!!\n");
 
 		request_size = recvRequestMessage(c_sock, request_message, SIZE);
 		if(request_size == -1) {
