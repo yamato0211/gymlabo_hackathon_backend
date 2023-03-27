@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -18,23 +20,13 @@ type User struct {
 	Image *string `json:"image"`
 }
 
-type Users map[string]User
-
-// type Post struct {
-// 	Title   string   `json:"title"`
-// 	Content string   `json:"content"`
-// 	Likes   []string `json:"likes"`
-// }
-
-// type UserPosts struct {
-// 	Posts map[string]Post `json:"posts"`
-// }
-
-// type PostsDatabase map[string]UserPosts
-
 type CreatePostInput struct {
 	Title   string `json:"title"`
 	Content string `json:"content"`
+}
+
+type Like struct {
+	Email string `json:"email"`
 }
 
 type Post struct {
@@ -44,6 +36,12 @@ type Post struct {
 	CreatedAt time.Time `json:"created_at"`
 	Email     string    `json:"email"`
 	User      User      `json:"user"`
+	Likes     []Like    `json:"likes"`
+}
+
+type LikeRequest struct {
+	PostId int    `json:"post_id"`
+	Email  string `json:"email"`
 }
 
 func corsMiddleware(h http.Handler) http.Handler {
@@ -92,12 +90,14 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/go/", http.HandlerFunc(hello))
-	mux.Handle("/go/yakisyamo", http.HandlerFunc(returnYakisyamo))
+	mux.Handle("/go/", corsMiddleware(http.HandlerFunc(hello)))
+	mux.Handle("/go/yakisyamo", corsMiddleware(http.HandlerFunc(returnYakisyamo)))
 	mux.Handle("/go/long_polling", corsMiddleware(http.HandlerFunc(longPolling)))
-	//mux.Handle("/go/send", corsMiddleware(http.HandlerFunc(send)))
+	mux.Handle("/go/send/post", corsMiddleware(http.HandlerFunc(sendPost)))
 	mux.Handle("/go/posts/all", corsMiddleware(http.HandlerFunc(getPosts)))
 	mux.Handle("/go/post/", corsMiddleware(http.HandlerFunc(getPostsByEmail)))
+	mux.Handle("/go/like/create", corsMiddleware(http.HandlerFunc(createLike)))
+	mux.Handle("/go/like/delete", corsMiddleware(http.HandlerFunc(deleteLike)))
 
 	apiPort := "8000"
 	log.Printf("Listening on port %s", apiPort)
@@ -130,20 +130,17 @@ func returnYakisyamo(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonString)
 }
 
-// func send(w http.ResponseWriter, r *http.Request) {
-// 	// msgCh <- r.URL.Query().Get("sender")
-// 	createPost(w, r)
-// }
+func sendPost(w http.ResponseWriter, r *http.Request) {
+	createPost(w, r)
+}
 
 func longPolling(w http.ResponseWriter, r *http.Request) {
-	// msgChへ値が送信されるまで処理をブロック
 	msg := <-msgCh
 	w.Write([]byte(msg))
 }
 
 func getPosts(w http.ResponseWriter, r *http.Request) {
-	// データを取得する例
-	rows, err := db.Query("select posts.id, posts.title, posts.content, posts.created_at, posts.email, users.name, users.image FROM posts inner join users on posts.email = users.email order by created_at desc")
+	rows, err := db.Query("SELECT posts.id, posts.title, posts.content, posts.created_at, posts.email, users.name, users.image, COALESCE(json_agg(json_build_object('email', likes.email)) FILTER (WHERE likes.email IS NOT NULL), '[]'::json) AS likes FROM posts JOIN users ON users.email = posts.email LEFT JOIN likes ON likes.post_id = posts.id GROUP BY posts.id, users.id ORDER BY posts.created_at DESC;")
 	fmt.Println(rows)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -156,14 +153,23 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p Post
 		var u User
+		var likes []Like
+		var likesJSON []byte
 		var createdAt string
-		err = rows.Scan(&p.Id, &p.Title, &p.Content, &createdAt, &p.Email, &u.Name, &u.Image)
+		err = rows.Scan(&p.Id, &p.Title, &p.Content, &createdAt, &p.Email, &u.Name, &u.Image, &likesJSON)
+		if err != nil {
+			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		err = json.Unmarshal(likesJSON, &likes)
 		if err != nil {
 			fmt.Println(err.Error())
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		p.User = u
+		p.Likes = likes
 		t, _ := time.Parse("2006-01-02 15:04:05", createdAt)
 		p.CreatedAt = t
 		posts = append(posts, p)
@@ -181,8 +187,9 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 func getPostsByEmail(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/post")
 	_, email := filepath.Split(sub)
-	rows, err := db.Query("select posts.id, posts.title, posts.content, posts.created_at, posts.email, users.name, users.image FROM posts inner join users on posts.email = users.email where posts.email = :email order by created_at desc;", sql.Named("email", email))
-	fmt.Println(rows)
+
+	query := fmt.Sprintf("SELECT posts.id, posts.title, posts.content, posts.created_at, posts.email, users.name, users.image, COALESCE(json_agg(json_build_object('email', likes.email)) FILTER (WHERE likes.email IS NOT NULL), '[]'::json) AS likes FROM posts JOIN users ON users.email = posts.email LEFT JOIN likes ON likes.post_id = posts.id where posts.email = '%s' GROUP BY posts.id, users.id ORDER BY posts.created_at DESC;", email)
+	rows, err := db.Query(query)
 	if err != nil {
 		fmt.Println(err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -194,13 +201,22 @@ func getPostsByEmail(w http.ResponseWriter, r *http.Request) {
 		var p Post
 		var u User
 		var createdAt string
-		err = rows.Scan(&p.Id, &p.Title, &p.Content, &createdAt, &p.Email, &u.Name, &u.Image)
+		var likes []Like
+		var likesJSON []byte
+		err = rows.Scan(&p.Id, &p.Title, &p.Content, &createdAt, &p.Email, &u.Name, &u.Image, &likesJSON)
+		if err != nil {
+			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		err = json.Unmarshal(likesJSON, &likes)
 		if err != nil {
 			fmt.Println(err.Error())
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		p.User = u
+		p.Likes = likes
 		t, _ := time.Parse("2006-01-02 15:04:05", createdAt)
 		p.CreatedAt = t
 		posts = append(posts, p)
@@ -215,70 +231,262 @@ func getPostsByEmail(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonString)
 }
 
-// func createPost(w http.ResponseWriter, r *http.Request) {
-// 	fmt.Println("start createPost")
-// 	fmt.Println(r.Body)
-// 	body, err := ioutil.ReadAll(r.Body)
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusBadRequest)
-// 		fmt.Println("Error reading request body:", err)
-// 		return
-// 	}
-// 	defer r.Body.Close()
+func createPost(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("start createPost")
+	fmt.Println(r.Body)
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println("Error reading request body:", err)
+		return
+	}
+	defer r.Body.Close()
 
-// 	fmt.Println("Request body:", string(body))
-// 	decoder := json.NewDecoder(bytes.NewReader(body))
-// 	fmt.Println(decoder)
-// 	var p CreatePostInput
-// 	if err := decoder.Decode(&p); err != nil {
-// 		http.Error(w, err.Error(), http.StatusBadRequest)
-// 		fmt.Println("132", err.Error())
-// 		return
-// 	}
+	fmt.Println("Request body:", string(body))
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	fmt.Println(decoder)
+	var p CreatePostInput
+	if err := decoder.Decode(&p); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println(err.Error())
+		return
+	}
 
-// 	byteArray, err := ioutil.ReadFile("post.json")
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		fmt.Println(err.Error())
-// 		return
-// 	}
-// 	var posts PostsDatabase
-// 	if err := json.Unmarshal(byteArray, &posts); err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		fmt.Println("145", err.Error())
-// 		return
-// 	}
+	var post Post
+	now := time.Now().In(time.UTC)
+	query := fmt.Sprintf("insert into posts (title, content, created_at, email) values('%s','%s','%s','%s')", p.Title, p.Content, now.Format("2006-01-02 15:04:05"), "kizuku@mail.com")
+	result, err := db.Exec(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Println(err.Error())
+		return
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		fmt.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-// 	byteUserArray, err := ioutil.ReadFile("user.json")
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		fmt.Println("152", err.Error())
-// 		return
-// 	}
-// 	var users Users
-// 	if err := json.Unmarshal(byteUserArray, &users); err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		fmt.Println("158", err.Error())
-// 		return
-// 	}
+	query = fmt.Sprintf("SELECT * FROM posts WHERE id = '%d'", id)
+	rows, err := db.Query(query)
+	if err != nil {
+		fmt.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err = rows.Scan(&post.Id, &post.Title, &post.Content, &post.CreatedAt, &post.Email)
+		if err != nil {
+			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		fmt.Println(post)
+	}
+	var name string
+	var image *string
+	userQuery := fmt.Sprintf("select name,image from users where email = '%s'", "kizuku@mail.com")
+	userRow, err := db.Query(userQuery)
+	if err != nil {
+		fmt.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for userRow.Next() {
+		err = userRow.Scan(&name, &image)
+		if err != nil {
+			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
-// 	new := Post{
-// 		Title:   p.Title,
-// 		Content: p.Content,
-// 		Likes:   []string{},
-// 	}
-// 	newPostIndex := strconv.Itoa(len(posts["kizuku@mail.com"].Posts) + 1)
-// 	posts["kizuku@mail.com"].Posts[newPostIndex] = new
-// 	updatedJSON, err := json.Marshal(posts)
-// 	if err != nil {
-// 		fmt.Println("171", err.Error())
-// 		return
-// 	}
+	msgCh <- fmt.Sprintf("POST kizuku@mail.com %s %s", name, image)
 
-// 	err = ioutil.WriteFile("post.json", updatedJSON, 0644)
-// 	if err != nil {
-// 		fmt.Println("177", err.Error())
-// 		return
-// 	}
-// 	msgCh <- fmt.Sprintf("POST kizuku@mail.com %s %s", users["kizuku@mail.com"].Name, users["kizuku@mail.com"].Image)
-// }
+	jsonString, err := json.Marshal(post)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonString)
+}
+
+func createLike(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "this method not allowed", http.StatusBadRequest)
+		return
+	}
+	fmt.Println(r.Body)
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println("Error reading request body:", err)
+		return
+	}
+	defer r.Body.Close()
+
+	fmt.Println("Request body:", string(body))
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	fmt.Println(decoder)
+	var l LikeRequest
+	if err := decoder.Decode(&l); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Println(err.Error())
+		return
+	}
+
+	query := fmt.Sprintf("select post_id, email from likes where post_id = '%d' and email = '%s'", l.PostId, l.Email)
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println(err.Error())
+		fmt.Printf("0000")
+		return
+	}
+	fmt.Println("rows", rows)
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println(err.Error())
+		fmt.Printf("0001")
+		return
+	}
+	if len(columns) > 0 {
+		http.Error(w, "this user is already liked", http.StatusBadRequest)
+		fmt.Println("column more than zero")
+		return
+	}
+	fmt.Println("after rowsNext")
+
+	query = fmt.Sprintf("insert into likes (post_id, email) values('%d', '%s')", l.PostId, l.Email)
+	fmt.Println(query)
+	result, err := db.Exec(query)
+	fmt.Println("result", result)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Println(err.Error())
+		return
+	}
+
+	if affected, err := result.RowsAffected(); err == nil && affected > 0 {
+		query = fmt.Sprintf("select post_id, email from likes where post_id = '%d' and email = '%s'", l.PostId, l.Email)
+		rows, err := db.Query(query)
+		if err != nil {
+			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var post_id int
+		var email string
+		var name string
+		var image *string
+
+		for rows.Next() {
+			err = rows.Scan(&post_id, &email)
+			if err != nil {
+				fmt.Println(err.Error())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+		}
+
+		query = fmt.Sprintf("select name,image from users where email = '%s'", l.Email)
+		rows, err = db.Query(query)
+		if err != nil {
+			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for rows.Next() {
+			err = rows.Scan(&name, &image)
+			if err != nil {
+				fmt.Println(err.Error())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		msgCh <- fmt.Sprintf("LIKE %s %s %s %d", l.Email, name, image, l.PostId)
+		w.Write([]byte("ok"))
+	} else {
+		fmt.Println("insert処理が正常に完了しませんでした")
+		http.Error(w, "insert処理が正常に完了しませんでした", http.StatusInternalServerError)
+		return
+	}
+}
+
+func deleteLike(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "this method not allowed", http.StatusBadRequest)
+		return
+	}
+	fmt.Println(r.Body)
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println("Error reading request body:", err)
+		return
+	}
+	defer r.Body.Close()
+
+	fmt.Println("Request body:", string(body))
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	fmt.Println(decoder)
+	var l LikeRequest
+	if err := decoder.Decode(&l); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Println(err.Error())
+		return
+	}
+
+	query := fmt.Sprintf("select post_id, email from likes where post_id = '%d' and email = '%s'", l.PostId, l.Email)
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println(err.Error())
+		fmt.Printf("0000")
+		return
+	}
+	fmt.Println("rows", rows)
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		fmt.Println(err.Error())
+		fmt.Printf("0001")
+		return
+	}
+	if len(columns) == 0 {
+		http.Error(w, "this user is not liked", http.StatusBadRequest)
+		fmt.Println("column zero")
+		return
+	}
+	fmt.Println("after rowsNext")
+
+	query = fmt.Sprintf("delete from likes where post_id = '%d' and email = '%s'", l.PostId, l.Email)
+	fmt.Println(query)
+	result, err := db.Exec(query)
+	fmt.Println("result", result)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Println(err.Error())
+		return
+	}
+
+	if affected, err := result.RowsAffected(); err == nil && affected > 0 {
+		// msgCh <- fmt.Sprintf("LIKE %s %s %s %d", l.Email, name, image, l.PostId)
+		w.Write([]byte("ok"))
+	} else {
+		fmt.Println("insert処理が正常に完了しませんでした")
+		http.Error(w, "insert処理が正常に完了しませんでした", http.StatusInternalServerError)
+		return
+	}
+}
