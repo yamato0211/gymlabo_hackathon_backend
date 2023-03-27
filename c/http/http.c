@@ -52,10 +52,12 @@ int recvRequestMessage(int sock, char *request_message, unsigned int buf_size) {
  * request_message : 解析するリクエストメッセージが格納されたバッファへのアドレス
  * 戻り値 : 成功は0、失敗は-1
  */
-int parseRequestMessage(char *method, char *target, char *request_message) {
+int parseRequestMessage(char *method, char *target, char *request_message_) {
 	char *line;
 	char *tmp_method;
 	char *tmp_target;
+	char *request_message = (char*)malloc(strlen(request_message_)+1);
+	strcpy(request_message, request_message_);
 
 	//リクエストメッセージの１行目のみ取得
 	line = strtok(request_message, "\n");
@@ -63,6 +65,7 @@ int parseRequestMessage(char *method, char *target, char *request_message) {
 	//" "までの文字列を取得しmethodにコピー
 	tmp_method = strtok(line, " ");
 	if(tmp_method == NULL) {
+		free(request_message);
 		printf("get method error\n");
 		return -1;
 	}
@@ -71,24 +74,25 @@ int parseRequestMessage(char *method, char *target, char *request_message) {
 	//次の" "までの文字列を取得しtargetにコピー
 	tmp_target = strtok(NULL, " ");
 	if(tmp_target == NULL) {
+		free(request_message);
 		printf("get target error\n");
 		return -1;
 	}
 	strcpy(target, tmp_target);
-
+	free(request_message);
 	return 0;
 }
 
 int getBody(char *body, char *request_message) {
 	char *p = request_message;
-	while(!(p[0] == '\n' && p[1] == '\n')) {
-		if(p[1] == '\0') {
+	while(!(p[0] == '\r' && p[1] == '\n' && p[2] == '\r' && p[3] == '\n')) {
+		if(p[3] == '\0') {
 			strcpy(body, "");
 			return -1;
 		}
 		p++;
 	}
-	strcpy(body, p+2);
+	strcpy(body, p+4);
 	return 0;
 }
 

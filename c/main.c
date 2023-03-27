@@ -9,8 +9,8 @@
 #include "http/http.h"
 #include "json/json.h"
 
-#define SERVER_ADDR "172.29.0.3"
-#define SERVER_PORT 8001
+#define SERVER_ADDR "127.0.0.1"
+#define SERVER_PORT 8080
 #define SIZE (5*1024)
 
 int main(void){
@@ -89,24 +89,32 @@ main_loop:
 		fprintf(stderr, "%s\n", request_message);
 		if(request_size == -1) {
 			fprintf(stderr, "recvRequestMessage error\n");
+			close(w_addr);
 			continue;
 		}
 
 		if(request_size == 0) {
 			fprintf(stderr,"connection ended.\n");	
+			close(w_addr);
 			continue;
 		}
 
 		fprintf(stderr, "parseRequestMessage call.\n");
 		if(parseRequestMessage(method, target, request_message) == -1) {
 			fprintf(stderr,"parseRequestMessage error.\n");
+			close(w_addr);
 			continue;
 		}
 
 		fprintf(stderr, "check method.\n");
 		if(strcmp(method, "POST") == 0) {
 			fprintf(stderr, "getBody call.\n");
-			getBody(request_body, request_message);
+			fprintf(stderr, "request_message:%s\n", request_message);
+			if(getBody(request_body, request_message) == -1) {
+				fprintf(stderr, "getBody failed.\n");
+				close(w_addr);
+				continue;
+			}
 			fprintf(stderr, "%s\n",request_body);
 		} else {
 			fprintf(stderr, "method is not post.\n");
@@ -146,13 +154,14 @@ main_loop:
 			password = (char*)p->data;
 			sprintf(sql, "select * from users where email='%s';", email);
 			res = PQexec(conn, sql);
-			if(PQntuples(res) == 0) {
+			if(PQntuples(res) != 0) {
 				goto NotFound;
 			}
 			sprintf(sql, 
-					"insert into users (name,email,image,password_hash) value ('%s','%s','%s','%s');", 
+					"insert into users (name,email,image,password_hash) values ('%s','%s','%s','%s');", 
 					name, email, image, password);
-			PQexec(conn, sql);
+			res = PQexec(conn, sql);
+			fprintf(stderr, "%s\n", PQresStatus(PQresultStatus(res)));
 			sendSuccess(c_sock);
 			freeJson(json);
 			close(c_sock);
