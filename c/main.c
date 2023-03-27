@@ -163,7 +163,7 @@ main_loop:
 			if(PQntuples(res) == 0) {
 				goto NotFound;
 			}
-			if(strcmp(email,PQgetvalue(res, 0, PQfnumber(res, "password_hash")) == 0)) {
+			if(strcmp(email,PQgetvalue(res, 0, PQfnumber(res, "password_hash"))) == 0) {
 				sendSuccessEmail(c_sock, email);
 				close(c_sock);
 				close(w_addr);
