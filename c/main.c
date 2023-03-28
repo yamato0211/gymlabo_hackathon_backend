@@ -9,8 +9,8 @@
 #include "http/http.h"
 #include "json/json.h"
 
-#define SERVER_ADDR "127.0.0.1"
-#define SERVER_PORT 8080
+#define SERVER_ADDR "172.16.238.10"
+#define SERVER_PORT 8001
 #define SIZE (5*1024)
 
 int main(void){
@@ -34,7 +34,7 @@ int main(void){
 	PGconn *conn;
 	PGresult *res;
 
-	conn = PQconnectdb("host=localhost port=5432 dbname=test user=user password=password");
+	conn = PQconnectdb("host=172.16.238.9 port=5432 dbname=test user=user password=password");
 	if(PQstatus(conn) != CONNECTION_OK) {
 		fprintf(stderr, "Connection to databese failed: %s\n", PQerrorMessage(conn));
 		PQfinish(conn);
